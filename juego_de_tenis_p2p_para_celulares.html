@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Arcade Tennis P2P Multijugador</title>
+    <!-- Tailwind CSS para diseño responsivo y limpio -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PeerJS para conexión directa P2P mediante WebRTC -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- QRCode.js para generación de código QR rápido -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <!-- Iconos Phosphor -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <style>
+        /* Deshabilitar scroll y gestos por defecto para experiencia de juego táctil fluida */
+        body {
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            background-color: #0f172a;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            overflow: hidden;
+        }
+        
+        /* Estilos de brillo neón retro-arcade */
+        .glow-cyan {
+            box-shadow: 0 0 15px rgba(6, 182, 212, 0.6), inset 0 0 10px rgba(6, 182, 212, 0.4);
+        }
+        .glow-pink {
+            box-shadow: 0 0 15px rgba(236, 72, 153, 0.6), inset 0 0 10px rgba(236, 72, 153, 0.4);
+        }
+        .text-glow-cyan {
+            text-shadow: 0 0 8px rgba(6, 182, 212, 0.8);
+        }
+        .text-glow-pink {
+            text-shadow: 0 0 8px rgba(236, 72, 153, 0.8);
+        }
+        
+        /* Ocultar elementos sin romper layout */
+        .hidden-screen {
+            display: none !important;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col justify-between text-white select-none">
+
+    <!-- PANTALLA PRINCIPAL DE MENÚ Y LOBBY -->
+    <div id="screen-lobby" class="fixed inset-0 z-50 bg-slate-900/95 backdrop-blur-md flex flex-col justify-center items-center p-4">
+        <div class="max-w-md w-full bg-slate-800/80 border border-slate-700 rounded-2xl p-6 shadow-2xl flex flex-col items-center text-center">
+            <h1 class="text-4xl font-extrabold italic tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-pink-500 mb-2">
+                P2P TENNIS
+            </h1>
+            <p class="text-slate-400 text-xs mb-6">Conecta 2 celulares via WebRTC para jugar en vivo</p>
+
+            <!-- Estado de red PeerJS -->
+            <div id="peer-status-container" class="mb-6 flex items-center gap-2 text-sm text-slate-300 bg-slate-900/60 px-4 py-2 rounded-full border border-slate-700">
+                <span id="status-dot" class="w-3 h-3 rounded-full bg-yellow-500 animate-pulse"></span>
+                <span id="status-text">Inicializando servidor red...</span>
+            </div>
+
+            <!-- Opción 1: Crear Sala (HOST) -->
+            <div id="host-panel" class="w-full space-y-4">
+                <button id="btn-create-room" disabled onclick="createRoom()" class="w-full py-4 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 active:scale-95 text-white font-bold text-lg rounded-xl transition shadow-lg flex items-center justify-center gap-2 disabled:opacity-50">
+                    <i class="ph ph-plus-circle text-2xl"></i> CREAR SALA (JUGADOR 1)
+                </button>
+
+                <div class="relative flex py-2 items-center">
+                    <div class="flex-grow border-t border-slate-700"></div>
+                    <span class="flex-shrink mx-4 text-slate-500 text-xs uppercase font-bold">o unirse</span>
+                    <div class="flex-grow border-t border-slate-700"></div>
+                </div>
+
+                <!-- Opción 2: Unirse a Sala (CLIENTE) -->
+                <div class="flex gap-2">
+                    <input type="text" id="join-room-id" placeholder="CÓDIGO DE SALA" uppercase class="bg-slate-900 border border-slate-700 text-center text-xl tracking-widest font-mono text-cyan-400 uppercase rounded-xl px-4 py-3 w-full focus:outline-none focus:border-cyan-500 placeholder:text-slate-600">
+                    <button id="btn-join-room" disabled onclick="joinRoom()" class="bg-pink-600 hover:bg-pink-500 active:scale-95 px-6 font-bold rounded-xl transition flex items-center justify-center disabled:opacity-50">
+                        <i class="ph ph-sign-in text-2xl"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Panel cuando la sala fue creada (HOST ESPERANDO) -->
+            <div id="room-info-panel" class="hidden-screen w-full flex flex-col items-center space-y-4">
+                <p class="text-sm text-cyan-400 font-semibold uppercase tracking-wider">Código de Sala:</p>
+                <div class="flex items-center gap-2 bg-slate-900 border border-cyan-500/50 px-6 py-3 rounded-xl w-full justify-between">
+                    <span id="display-room-id" class="text-3xl font-mono font-bold text-cyan-400 tracking-wider">------</span>
+                    <button onclick="copyRoomCode()" class="text-slate-400 hover:text-white p-2">
+                        <i class="ph ph-copy text-xl"></i>
+                    </button>
+                </div>
+
+                <!-- Código QR para escaneo rápido en segundo celular -->
+                <div class="p-3 bg-white rounded-xl shadow-lg my-2">
+                    <div id="qrcode"></div>
+                </div>
+                <p class="text-xs text-slate-400">Escanea el código QR o ingresa la Clave en el otro celular.</p>
+                <button onclick="cancelRoom()" class="text-xs text-slate-500 underline hover:text-slate-300 pt-2">Cancelar y volver</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PANTALLA RECONEXIÓN Y MENSAJES -->
+    <div id="screen-overlay" class="hidden-screen fixed inset-0 z-40 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
+        <i id="overlay-icon" class="ph ph-wifi-x text-6xl text-pink-500 mb-4 animate-bounce"></i>
+        <h2 id="overlay-title" class="text-2xl font-bold mb-2 text-white">Conexión Perdida</h2>
+        <p id="overlay-msg" class="text-slate-400 text-sm max-w-xs mb-6">Intentando reconectar con el otro jugador...</p>
+        <button id="btn-reconnect" onclick="resetToLobby()" class="px-6 py-3 bg-slate-800 border border-slate-600 hover:bg-slate-700 rounded-xl text-sm font-semibold">
+            Volver al Menú Principal
+        </button>
+    </div>
+
+    <!-- CABECERA CON MARCADOR -->
+    <header class="w-full bg-slate-950/90 border-b border-slate-800 py-3 px-6 flex justify-between items-center z-10 shadow-md">
+        <!-- Jugador 1 -->
+        <div class="flex items-center gap-3">
+            <div class="w-3 h-8 bg-cyan-500 rounded-full glow-cyan"></div>
+            <div>
+                <span class="text-xs text-cyan-400 block font-semibold">JUGADOR 1</span>
+                <span id="score-p1" class="text-2xl font-extrabold font-mono leading-none">0</span>
+            </div>
+        </div>
+
+        <!-- Info central / Estado del juego -->
+        <div class="text-center">
+            <span id="game-status-tag" class="text-[10px] tracking-widest bg-slate-800 text-slate-400 px-3 py-1 rounded-full uppercase border border-slate-700">ESPERANDO</span>
+        </div>
+
+        <!-- Jugador 2 -->
+        <div class="flex items-center gap-3 text-right">
+            <div>
+                <span class="text-xs text-pink-400 block font-semibold">JUGADOR 2</span>
+                <span id="score-p2" class="text-2xl font-extrabold font-mono leading-none">0</span>
+            </div>
+            <div class="w-3 h-8 bg-pink-500 rounded-full glow-pink"></div>
+        </div>
+    </header>
+
+    <!-- ÁREA DE JUEGO (CANVAS) -->
+    <main class="relative flex-grow w-full h-full flex items-center justify-center p-2 bg-slate-950 overflow-hidden">
+        <canvas id="gameCanvas" class="w-full h-full rounded-2xl border border-slate-800 bg-slate-900/60 shadow-inner"></canvas>
+    </main>
+
+    <!-- CONTROLES TÁCTILES EN PANTALLA (Para móviles) -->
+    <footer class="w-full bg-slate-950 border-t border-slate-900 p-3 z-10 flex gap-4 h-28">
+        <button id="btn-touch-up" class="flex-1 bg-slate-800/80 active:bg-cyan-500/30 border border-slate-700/80 active:border-cyan-400 rounded-xl flex items-center justify-center text-slate-300 active:text-cyan-400 transition-colors">
+            <i class="ph ph-caret-up text-4xl"></i>
+        </button>
+        <button id="btn-touch-down" class="flex-1 bg-slate-800/80 active:bg-cyan-500/30 border border-slate-700/80 active:border-cyan-400 rounded-xl flex items-center justify-center text-slate-300 active:text-cyan-400 transition-colors">
+            <i class="ph ph-caret-down text-4xl"></i>
+        </button>
+    </footer>
+
+    <script>
+        /* --- MÓDULO WEB AUDIO API (Efectos de Sonido) --- */
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+
+            playHit() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(320, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(120, this.ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.08);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.08);
+            }
+
+            playWall() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(180, this.ctx.currentTime);
+                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.05);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.05);
+            }
+
+            playScore() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(440, now);
+                osc.frequency.setValueAtTime(880, now + 0.1);
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(now + 0.3);
+            }
+        }
+
+        const audio = new SoundFX();
+
+        /* --- VARIABLES GLOBALES DEL JUEGO Y RED --- */
+        let peer = null;
+        let conn = null;
+        let isHost = false;
+        let myPlayerNum = 0; // 1 o 2
+        let gameRunning = false;
+
+        // Configuración de lienzo y render
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Dimensiones virtuales estandarizadas (coordenadas relativas 0..100)
+        const GAME_WIDTH = 1000;
+        const GAME_HEIGHT = 600;
+
+        // Estado del Juego (Host es la autoridad)
+        const gameState = {
+            paddle1: { y: 250, height: 100, width: 16 }, // Jugador 1 (Izquierda)
+            paddle2: { y: 250, height: 100, width: 16 }, // Jugador 2 (Derecha)
+            ball: { x: 500, y: 300, vx: 6, vy: 4, radius: 10 },
+            score1: 0,
+            score2: 0
+        };
+
+        // Entradas de control local
+        let moveUp = false;
+        let moveDown = false;
+        const PADDLE_SPEED = 9;
+
+        /* --- INICIALIZACIÓN DE CANVAS Y RESPONSIVIDAD --- */
+        function resizeCanvas() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        /* --- MANEJO DE RED Y PEERJS --- */
+        function initPeer() {
+            // Generar ID único corto para peer
+            peer = new Peer();
+
+            peer.on('open', (id) => {
+                document.getElementById('status-dot').className = "w-3 h-3 rounded-full bg-green-500";
+                document.getElementById('status-text').innerText = "Red lista";
+                document.getElementById('btn-create-room').disabled = false;
+                document.getElementById('btn-join-room').disabled = false;
+
+                // Auto-unirse si existe parámetro en URL
+                const urlParams = new URLSearchParams(window.location.search);
+                const roomParam = urlParams.get('room');
+                if (roomParam) {
+                    document.getElementById('join-room-id').value = roomParam;
+                    joinRoom();
+                }
+            });
+
+            peer.on('connection', (c) => {
+                if (isHost && !conn) {
+                    conn = c;
+                    setupConnection();
+                } else {
+                    // Rechazar múltiples conexiones
+                    c.close();
+                }
+            });
+
+            peer.on('error', (err) => {
+                console.error("Error PeerJS:", err);
+                showOverlay("Error de Conexión", "No se pudo conectar al servidor peer.");
+            });
+        }
+
+        function createRoom() {
+            audio.init();
+            isHost = true;
+            myPlayerNum = 1;
+
+            const shortCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+            
+            // Recrear peer con ID corto si se desea o usar el asignado
+            document.getElementById('host-panel').classList.add('hidden-screen');
+            document.getElementById('room-info-panel').classList.remove('hidden-screen');
+            document.getElementById('display-room-id').innerText = peer.id;
+
+            // Generar Código QR
+            const qrContainer = document.getElementById('qrcode');
+            qrContainer.innerHTML = "";
+            const joinUrl = `${window.location.origin}${window.location.pathname}?room=${peer.id}`;
+            new QRCode(qrContainer, {
+                text: joinUrl,
+                width: 128,
+                height: 128,
+                colorDark : "#0f172a",
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.M
+            });
+        }
+
+        function joinRoom() {
+            audio.init();
+            const hostId = document.getElementById('join-room-id').value.trim();
+            if (!hostId) return;
+
+            isHost = false;
+            myPlayerNum = 2;
+
+            document.getElementById('status-text').innerText = "Conectando a sala...";
+            document.getElementById('status-dot').className = "w-3 h-3 rounded-full bg-yellow-500 animate-pulse";
+
+            conn = peer.connect(hostId, { reliable: true });
+            setupConnection();
+        }
+
+        function setupConnection() {
+            conn.on('open', () => {
+                document.getElementById('screen-lobby').classList.add('hidden-screen');
+                hideOverlay();
+                document.getElementById('game-status-tag').innerText = "EN JUEGO";
+                document.getElementById('game-status-tag').className = "text-[10px] tracking-widest bg-green-950 text-green-400 px-3 py-1 rounded-full uppercase border border-green-800";
+                
+                gameRunning = true;
+
+                if (isHost) {
+                    resetBall();
+                    requestAnimationFrame(gameLoop);
+                }
+            });
+
+            conn.on('data', (data) => {
+                handleNetworkData(data);
+            });
+
+            conn.on('close', () => {
+                handleDisconnect();
+            });
+
+            conn.on('error', () => {
+                handleDisconnect();
+            });
+        }
+
+        function handleDisconnect() {
+            gameRunning = false;
+            showOverlay("Conexión Perdida", "El otro jugador se ha desconectado o se perdió la red.");
+        }
+
+        function cancelRoom() {
+            document.getElementById('room-info-panel').classList.add('hidden-screen');
+            document.getElementById('host-panel').classList.remove('hidden-screen');
+            isHost = false;
+        }
+
+        function copyRoomCode() {
+            const code = document.getElementById('display-room-id').innerText;
+            navigator.clipboard.writeText(code);
+            alert("Código de sala copiado al portapapeles");
+        }
+
+        /* --- SINCRONIZACIÓN DE RED --- */
+        function sendNetworkData(data) {
+            if (conn && conn.open) {
+                conn.send(data);
+            }
+        }
+
+        function handleNetworkData(data) {
+            // El cliente recibe actualización de estado completa del Host
+            if (!isHost && data.type === 'SYNC') {
+                gameState.paddle1.y = data.state.paddle1.y;
+                gameState.paddle2.y = data.state.paddle2.y;
+                gameState.ball = data.state.ball;
+                gameState.score1 = data.state.score1;
+                gameState.score2 = data.state.score2;
+
+                updateScoreUI();
+
+                if (data.sound) {
+                    if (data.sound === 'hit') audio.playHit();
+                    if (data.sound === 'wall') audio.playWall();
+                    if (data.sound === 'score') audio.playScore();
+                }
+            }
+
+            // El Host recibe comandos de movimiento del Jugador 2 (Cliente)
+            if (isHost && data.type === 'INPUT') {
+                if (data.player === 2) {
+                    if (data.action === 'MOVE') {
+                        gameState.paddle2.y = data.y;
+                    }
+                }
+            }
+        }
+
+        /* --- FÍSICA Y BUCLE DE JUEGO (SOLO HOST) --- */
+        function resetBall() {
+            gameState.ball.x = GAME_WIDTH / 2;
+            gameState.ball.y = GAME_HEIGHT / 2;
+            gameState.ball.vx = (Math.random() > 0.5 ? 1 : -1) * 6;
+            gameState.ball.vy = (Math.random() * 2 - 1) * 5;
+        }
+
+        let lastSoundEvent = null;
+
+        function updatePhysics() {
+            if (!isHost) return;
+
+            lastSoundEvent = null;
+
+            // Movimiento de raqueta local (Host = P1)
+            if (moveUp) gameState.paddle1.y -= PADDLE_SPEED;
+            if (moveDown) gameState.paddle1.y += PADDLE_SPEED;
+
+            // Limitar rangos de raquetas
+            gameState.paddle1.y = Math.max(0, Math.min(GAME_HEIGHT - gameState.paddle1.height, gameState.paddle1.y));
+            gameState.paddle2.y = Math.max(0, Math.min(GAME_HEIGHT - gameState.paddle2.height, gameState.paddle2.y));
+
+            // Actualizar Pelota
+            const ball = gameState.ball;
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+
+            // Rebotes Superior / Inferior
+            if (ball.y - ball.radius <= 0 || ball.y + ball.radius >= GAME_HEIGHT) {
+                ball.vy *= -1;
+                lastSoundEvent = 'wall';
+                audio.playWall();
+            }
+
+            // Colisión Raqueta 1 (Izquierda)
+            if (ball.x - ball.radius <= 30 + gameState.paddle1.width &&
+                ball.x - ball.radius >= 30 &&
+                ball.y >= gameState.paddle1.y &&
+                ball.y <= gameState.paddle1.y + gameState.paddle1.height) {
+                
+                ball.vx = Math.abs(ball.vx) + 0.3; // Aumentar velocidad paulatinamente
+                // Modificar ángulo según punto de impacto
+                const hitSpot = (ball.y - (gameState.paddle1.y + gameState.paddle1.height/2)) / (gameState.paddle1.height/2);
+                ball.vy = hitSpot * 7;
+                lastSoundEvent = 'hit';
+                audio.playHit();
+            }
+
+            // Colisión Raqueta 2 (Derecha)
+            if (ball.x + ball.radius >= GAME_WIDTH - 30 - gameState.paddle2.width &&
+                ball.x + ball.radius <= GAME_WIDTH - 30 &&
+                ball.y >= gameState.paddle2.y &&
+                ball.y <= gameState.paddle2.y + gameState.paddle2.height) {
+                
+                ball.vx = -Math.abs(ball.vx) - 0.3;
+                const hitSpot = (ball.y - (gameState.paddle2.y + gameState.paddle2.height/2)) / (gameState.paddle2.height/2);
+                ball.vy = hitSpot * 7;
+                lastSoundEvent = 'hit';
+                audio.playHit();
+            }
+
+            // Puntuación
+            if (ball.x < 0) {
+                gameState.score2++;
+                lastSoundEvent = 'score';
+                audio.playScore();
+                updateScoreUI();
+                resetBall();
+            } else if (ball.x > GAME_WIDTH) {
+                gameState.score1++;
+                lastSoundEvent = 'score';
+                audio.playScore();
+                updateScoreUI();
+                resetBall();
+            }
+
+            // Transmitir estado a Jugador 2
+            sendNetworkData({
+                type: 'SYNC',
+                state: gameState,
+                sound: lastSoundEvent
+            });
+        }
+
+        function updateScoreUI() {
+            document.getElementById('score-p1').innerText = gameState.score1;
+            document.getElementById('score-p2').innerText = gameState.score2;
+        }
+
+        /* --- RENDERIZADO GRÁFICO (CANVAS) --- */
+        function render() {
+            // Limpiar fondo
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Escala para renderizado responsivo adaptado al contenedor
+            const scaleX = canvas.width / GAME_WIDTH;
+            const scaleY = canvas.height / GAME_HEIGHT;
+
+            // Línea divisoria central
+            ctx.setLineDash([10, 10]);
+            ctx.beginPath();
+            ctx.moveTo(canvas.width / 2, 0);
+            ctx.lineTo(canvas.width / 2, canvas.height);
+            ctx.strokeStyle = '#334155';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Raqueta 1 (Cian)
+            ctx.fillStyle = '#06b6d4';
+            ctx.shadowColor = '#06b6d4';
+            ctx.shadowBlur = 12;
+            ctx.fillRect(
+                30 * scaleX, 
+                gameState.paddle1.y * scaleY, 
+                gameState.paddle1.width * scaleX, 
+                gameState.paddle1.height * scaleY
+            );
+
+            // Raqueta 2 (Rosa)
+            ctx.fillStyle = '#ec4899';
+            ctx.shadowColor = '#ec4899';
+            ctx.shadowBlur = 12;
+            ctx.fillRect(
+                (GAME_WIDTH - 30 - gameState.paddle2.width) * scaleX, 
+                gameState.paddle2.y * scaleY, 
+                gameState.paddle2.width * scaleX, 
+                gameState.paddle2.height * scaleY
+            );
+
+            // Pelota (Blanca con destello)
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowColor = '#ffffff';
+            ctx.shadowBlur = 15;
+            ctx.beginPath();
+            ctx.arc(
+                gameState.ball.x * scaleX, 
+                gameState.ball.y * scaleY, 
+                gameState.ball.radius * Math.min(scaleX, scaleY), 
+                0, Math.PI * 2
+            );
+            ctx.fill();
+
+            // Resetear sombras
+            ctx.shadowBlur = 0;
+        }
+
+        /* --- BUCLE PRINCIPAL DE JUEGO --- */
+        function gameLoop() {
+            if (gameRunning) {
+                if (isHost) {
+                    updatePhysics();
+                }
+                render();
+                requestAnimationFrame(gameLoop);
+            }
+        }
+
+        // Si es cliente, renderizar constantemente las posiciones recibidas
+        function clientRenderLoop() {
+            if (!isHost && gameRunning) {
+                render();
+            }
+            requestAnimationFrame(clientRenderLoop);
+        }
+        requestAnimationFrame(clientRenderLoop);
+
+        /* --- CONTROLES Y EVENTOS DE ENTRADA --- */
+
+        // Enviar posición para Jugador 2 (Cliente) al Host
+        function sendClientPaddlePosition() {
+            if (!isHost && conn && conn.open) {
+                sendNetworkData({
+                    type: 'INPUT',
+                    player: 2,
+                    action: 'MOVE',
+                    y: gameState.paddle2.y
+                });
+            }
+        }
+
+        // Manejo de entrada por botones táctiles
+        const btnUp = document.getElementById('btn-touch-up');
+        const btnDown = document.getElementById('btn-touch-down');
+
+        function processInputMove() {
+            const currentPaddle = myPlayerNum === 1 ? gameState.paddle1 : gameState.paddle2;
+
+            if (moveUp) {
+                currentPaddle.y -= PADDLE_SPEED;
+            }
+            if (moveDown) {
+                currentPaddle.y += PADDLE_SPEED;
+            }
+
+            // Limitar rangos
+            currentPaddle.y = Math.max(0, Math.min(GAME_HEIGHT - currentPaddle.height, currentPaddle.y));
+
+            if (!isHost) {
+                sendClientPaddlePosition();
+            }
+        }
+
+        // Bucle continuo para lectura suave de controles
+        setInterval(() => {
+            if (gameRunning) {
+                processInputMove();
+            }
+        }, 16);
+
+        // Eventos táctiles para botones en pantalla
+        const addTouchEvents = (element, onStart, onEnd) => {
+            element.addEventListener('touchstart', (e) => { e.preventDefault(); onStart(); });
+            element.addEventListener('touchend', (e) => { e.preventDefault(); onEnd(); });
+            element.addEventListener('mousedown', onStart);
+            element.addEventListener('mouseup', onEnd);
+            element.addEventListener('mouseleave', onEnd);
+        };
+
+        addTouchEvents(btnUp, () => moveUp = true, () => moveUp = false);
+        addTouchEvents(btnDown, () => moveDown = true, () => moveDown = false);
+
+        // Control táctil directo en lienzo (Deslizar dedo sobre el canvas)
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (!gameRunning) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const touchY = e.touches[0].clientY - rect.top;
+            const normalizedY = (touchY / rect.height) * GAME_HEIGHT;
+
+            const currentPaddle = myPlayerNum === 1 ? gameState.paddle1 : gameState.paddle2;
+            currentPaddle.y = normalizedY - currentPaddle.height / 2;
+            currentPaddle.y = Math.max(0, Math.min(GAME_HEIGHT - currentPaddle.height, currentPaddle.y));
+
+            if (!isHost) {
+                sendClientPaddlePosition();
+            }
+        }, { passive: false });
+
+        // Controles de teclado para Pruebas en PC (Flechas y W/S)
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') moveUp = true;
+            if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') moveDown = false;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') moveUp = false;
+            if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') moveDown = false;
+        });
+
+        /* --- INTERFAZ Y MÓDULO DE RECONEXIÓN --- */
+        function showOverlay(title, msg) {
+            document.getElementById('overlay-title').innerText = title;
+            document.getElementById('overlay-msg').innerText = msg;
+            document.getElementById('screen-overlay').classList.remove('hidden-screen');
+        }
+
+        function hideOverlay() {
+            document.getElementById('screen-overlay').classList.add('hidden-screen');
+        }
+
+        function resetToLobby() {
+            gameRunning = false;
+            if (conn) conn.close();
+            conn = null;
+
+            hideOverlay();
+            document.getElementById('screen-lobby').classList.remove('hidden-screen');
+            document.getElementById('room-info-panel').classList.add('hidden-screen');
+            document.getElementById('host-panel').classList.remove('hidden-screen');
+
+            document.getElementById('game-status-tag').innerText = "ESPERANDO";
+            document.getElementById('game-status-tag').className = "text-[10px] tracking-widest bg-slate-800 text-slate-400 px-3 py-1 rounded-full uppercase border border-slate-700";
+
+            gameState.score1 = 0;
+            gameState.score2 = 0;
+            updateScoreUI();
+        }
+
+        // Inicializar servidor P2P al cargar pantalla
+        window.onload = () => {
+            initPeer();
+        };
+    </script>
+</body>
+</html>
